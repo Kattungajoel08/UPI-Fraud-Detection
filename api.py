@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 import pickle
 import pandas as pd
+import sqlite3
+from datetime import datetime
 
-# ---------------- INIT APP ----------------
+# ---------------- INIT ----------------
 app = FastAPI()
 
 # ---------------- LOAD MODELS ----------------
@@ -10,56 +12,89 @@ rf_model = pickle.load(open("rf_model.pkl", "rb"))
 iso_model = pickle.load(open("iso_model.pkl", "rb"))
 scaler = pickle.load(open("scaler.pkl", "rb"))
 
-# ---------------- FEATURE COLUMNS ----------------
+# ---------------- DB SETUP ----------------
+conn = sqlite3.connect("fraud.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    merchant TEXT,
+    amount REAL,
+    risk TEXT,
+    fraud INTEGER,
+    time TEXT
+)
+""")
+conn.commit()
+
+# ---------------- FEATURES ----------------
 columns = [
     "Time","V1","V2","V3","V4","V5","V6","V7","V8","V9","V10",
     "V11","V12","V13","V14","V15","V16","V17","V18","V19","V20",
     "V21","V22","V23","V24","V25","V26","V27","V28","Amount"
 ]
 
-# ---------------- HOME ROUTE ----------------
+# ---------------- HOME ----------------
 @app.get("/")
 def home():
-    return {"message": "UPI Fraud Detection API Running 🚀"}
+    return {"message": "API Running"}
 
-# ---------------- PREDICT ROUTE ----------------
+# ---------------- PREDICT ----------------
 @app.post("/predict")
 def predict(data: dict):
-    try:
-        # ✅ VALIDATION
-        if "features" not in data:
-            return {"error": "Missing 'features' field"}
+    amount = float(data["features"][-1])
+    merchant = data.get("merchant", "Unknown")
 
-        if len(data["features"]) != 30:
-            return {"error": "Feature length must be exactly 30"}
+    df = pd.DataFrame([data["features"]], columns=columns)
+    scaled = scaler.transform(df)
 
-        amount = float(data["features"][-1])
+    rf_pred = rf_model.predict(scaled)[0]
+    iso_pred = iso_model.predict(scaled)[0]
 
-        # ---------------- PREPROCESS ----------------
-        df = pd.DataFrame([data["features"]], columns=columns)
-        scaled = scaler.transform(df)
+    ml_fraud = 1 if (rf_pred == 1 or iso_pred == -1) else 0
 
-        # ---------------- ML MODELS ----------------
-        rf_pred = rf_model.predict(scaled)[0]
-        iso_pred = iso_model.predict(scaled)[0]
+    # Risk logic
+    if amount <= 2000:
+        risk = "LOW"
+    elif amount <= 5000:
+        risk = "MEDIUM"
+    else:
+        risk = "HIGH"
 
-        # ML fraud decision
-        ml_fraud = 1 if (rf_pred == 1 or iso_pred == -1) else 0
+    # ✅ STORE IN DATABASE
+    cursor.execute("""
+    INSERT INTO transactions (merchant, amount, risk, fraud, time)
+    VALUES (?, ?, ?, ?, ?)
+    """, (
+        merchant,
+        amount,
+        risk,
+        ml_fraud,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+    conn.commit()
 
-        # ---------------- RULE-BASED RISK ----------------
-        if amount <= 2000:
-            risk_level = "LOW"
-        elif amount <= 5000:
-            risk_level = "MEDIUM"
-        else:
-            risk_level = "HIGH"
+    return {
+        "fraud": ml_fraud,
+        "risk_level": risk,
+        "amount": amount
+    }
 
-        # ---------------- FINAL RESPONSE ----------------
-        return {
-            "fraud": int(ml_fraud),
-            "risk_level": risk_level,
-            "amount": amount
+# ---------------- GET ALL TRANSACTIONS ----------------
+@app.get("/transactions")
+def get_transactions():
+    cursor.execute("SELECT * FROM transactions ORDER BY id DESC")
+    rows = cursor.fetchall()
+
+    return [
+        {
+            "id": r[0],
+            "merchant": r[1],
+            "amount": r[2],
+            "risk": r[3],
+            "fraud": r[4],
+            "time": r[5]
         }
-
-    except Exception as e:
-        return {"error": str(e)}
+        for r in rows
+    ]

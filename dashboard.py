@@ -1,10 +1,9 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import plotly.express as px
+import requests
 from streamlit_autorefresh import st_autorefresh
 
-# ---------------- LOGIN ----------------
 USERNAME = "admin"
 PASSWORD = "1234"
 
@@ -12,7 +11,7 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 def login():
-    st.title("🔐 UPI Fraud Monitoring Login")
+    st.title("🔐 Login")
 
     user = st.text_input("Username")
     pwd = st.text_input("Password", type="password")
@@ -24,17 +23,20 @@ def login():
         else:
             st.error("Invalid credentials")
 
-# ---------------- DASHBOARD ----------------
 def dashboard():
 
+    st.set_page_config(layout="wide")
     st_autorefresh(interval=3000, key="refresh")
 
     st.title("💳 UPI Fraud Detection Dashboard")
 
-    # ---------------- DATABASE ----------------
-    conn = sqlite3.connect("fraud.db")
-    df = pd.read_sql_query("SELECT * FROM transactions", conn)
-    conn.close()
+    API_URL = "http://127.0.0.1:8000/transactions"
+
+    try:
+        df = pd.DataFrame(requests.get(API_URL).json())
+    except:
+        st.error("API not running")
+        return
 
     if df.empty:
         st.warning("No transactions yet")
@@ -43,60 +45,49 @@ def dashboard():
     # ---------------- METRICS ----------------
     total = len(df)
     frauds = df["fraud"].sum()
-    safe = total - frauds
+    drift_count = df["drift"].sum()
 
     col1, col2, col3 = st.columns(3)
-    col1.metric("Total Transactions", total)
-    col2.metric("Fraud Transactions", frauds)
-    col3.metric("Safe Transactions", safe)
+    col1.metric("Total", total)
+    col2.metric("Frauds", frauds)
+    col3.metric("Drift Alerts", drift_count)
 
-    # ---------------- ALERT ----------------
+    # ---------------- ALERTS ----------------
     if frauds > 0:
-        st.error("🚨 Fraud Transactions Detected!")
-    else:
-        st.success("System Secure")
+        st.error("🚨 Fraud Detected")
 
-    # ---------------- RISK DISTRIBUTION ----------------
-    st.subheader("📊 Risk Distribution")
+    if drift_count > 0:
+        st.warning("⚠ Concept Drift Detected")
 
-    fig1 = px.pie(df, names="risk", title="Risk Levels")
-    st.plotly_chart(fig1)
+    # ---------------- CHARTS ----------------
+    col4, col5 = st.columns(2)
 
-    # ---------------- FRAUD VS SAFE ----------------
-    st.subheader("⚠️ Fraud vs Safe")
+    with col4:
+        fig1 = px.pie(df, names="risk", title="Risk Distribution")
+        st.plotly_chart(fig1, use_container_width=True)
 
-    df["status"] = df["fraud"].apply(lambda x: "Fraud" if x == 1 else "Safe")
+    with col5:
+        df["status"] = df["fraud"].apply(lambda x: "Fraud" if x else "Safe")
+        fig2 = px.bar(df, x="risk", color="status", title="Fraud vs Safe")
+        st.plotly_chart(fig2, use_container_width=True)
 
-    fig2 = px.bar(df, x="risk", color="status", title="Fraud Detection by Risk")
-    st.plotly_chart(fig2)
-
-    # ---------------- AMOUNT DISTRIBUTION ----------------
-    st.subheader("💰 Transaction Amount Distribution")
-
-    fig3 = px.histogram(df, x="amount", nbins=20)
-    st.plotly_chart(fig3)
-
-    # ---------------- TIME ANALYSIS ----------------
-    st.subheader("⏰ Transactions Over Time")
+    # ---------------- DRIFT GRAPH ----------------
+    st.subheader("📉 Risk Score Trend")
 
     df["time"] = pd.to_datetime(df["time"])
-    fig4 = px.line(df, x="time", y="amount", title="Transactions Timeline")
-    st.plotly_chart(fig4)
+    fig3 = px.line(df, x="time", y="risk_score", markers=True)
+    st.plotly_chart(fig3, use_container_width=True)
 
     # ---------------- TABLE ----------------
-    st.subheader("📋 Transaction Records")
-
     def highlight(row):
-        if row["risk"] == "HIGH":
+        if row["drift"] == 1:
+            return ["background-color: orange"] * len(row)
+        elif row["risk"] == "HIGH":
             return ["background-color: red"] * len(row)
-        elif row["risk"] == "MEDIUM":
-            return ["background-color: yellow"] * len(row)
-        else:
-            return ["background-color: lightgreen"] * len(row)
+        return [""] * len(row)
 
-    st.dataframe(df.style.apply(highlight, axis=1))
+    st.dataframe(df.style.apply(highlight, axis=1), use_container_width=True)
 
-# ---------------- FLOW ----------------
 if st.session_state.logged_in:
     dashboard()
 else:

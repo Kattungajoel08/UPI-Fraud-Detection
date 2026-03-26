@@ -29,12 +29,18 @@ def init_db():
 
 init_db()
 
+# ---------------- HOME ----------------
+@app.get("/")
+def home():
+    return {"message": "API Running"}
+
 # ---------------- PREDICT ----------------
 @app.post("/predict")
 def predict(data: dict):
     amount = data["features"][-1]
+    merchant = data.get("merchant", "Unknown")
 
-    # simple logic
+    # logic
     if amount <= 2000:
         risk = "LOW"
         fraud = 0
@@ -43,7 +49,7 @@ def predict(data: dict):
         fraud = 0
     else:
         risk = "HIGH"
-        fraud = 1
+        fraud = 0  # still success (handled by app)
 
     risk_score = round(random.uniform(0.1, 0.9), 3)
 
@@ -54,14 +60,14 @@ def predict(data: dict):
     INSERT INTO transactions (merchant, amount, fraud, risk, drift, risk_score, time, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        "Unknown",
+        merchant,
         amount,
         fraud,
         risk,
         0,
         risk_score,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Processed"
+        "Approved"
     ))
 
     conn.commit()
@@ -69,13 +75,16 @@ def predict(data: dict):
 
     return {
         "fraud": fraud,
-        "risk_level": risk,
+        "risk": risk,
         "risk_score": risk_score
     }
 
 # ---------------- FRAUD LOG ----------------
 @app.post("/log_fraud")
 def log_fraud(data: dict):
+    merchant = data.get("merchant")
+    amount = data.get("amount")
+
     conn = sqlite3.connect("fraud.db")
     cursor = conn.cursor()
 
@@ -83,8 +92,8 @@ def log_fraud(data: dict):
     INSERT INTO transactions (merchant, amount, fraud, risk, drift, risk_score, time, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        data.get("merchant"),
-        data.get("amount"),
+        merchant,
+        amount,
         1,
         "HIGH",
         0,

@@ -60,15 +60,19 @@ def detect_drift(current_risk):
 # ---------------- HOME ----------------
 @app.get("/")
 def home():
-    return {"message": "ML API Running"}
+    return {"message": "ML Fraud Detection API Running"}
 
 # ---------------- PREDICT ----------------
-@app.post("/log_fraud")
+@app.post("/predict")
 def predict(data: dict):
-    print("Incoming:", data)
 
     merchant = data.get("merchant", "Unknown")
-    amount = data["features"][-1]
+
+    # ✅ SAFE INPUT HANDLING (fixes your error)
+    if "features" in data:
+        amount = data["features"][-1]
+    else:
+        amount = data.get("amount", 0)
 
     # ---------------- FEATURE VECTOR ----------------
     features = np.zeros((1, 30))
@@ -80,10 +84,10 @@ def predict(data: dict):
     prob_rf = rf_model.predict_proba(scaled)[0][1]
     prob = (0.6 * prob_sgd) + (0.4 * prob_rf)
 
-    # ---------------- ANOMALY ----------------
+    # ---------------- ANOMALY DETECTION ----------------
     anomaly = abs(iso_model.decision_function(scaled)[0])
 
-    # ---------------- BEHAVIOR ----------------
+    # ---------------- BEHAVIORAL PROFILING ----------------
     if amount > 5000:
         behavior = 0.8
     elif amount > 2000:
@@ -94,7 +98,7 @@ def predict(data: dict):
     # ---------------- AMOUNT FACTOR ----------------
     amount_factor = min(amount / 10000, 1)
 
-    # ---------------- FINAL RISK ----------------
+    # ---------------- FINAL RISK SCORE ----------------
     risk_score = (
         0.2 * prob +
         0.2 * anomaly +
@@ -104,10 +108,10 @@ def predict(data: dict):
 
     risk_score = min(risk_score, 1)
 
-    # ---------------- DRIFT ----------------
+    # ---------------- CONCEPT DRIFT ----------------
     drift_flag = detect_drift(risk_score)
 
-    # ---------------- DECISION ----------------
+    # ---------------- DECISION ENGINE ----------------
     if risk_score < 0.4:
         risk = "LOW"
         fraud = 0
@@ -123,7 +127,7 @@ def predict(data: dict):
         fraud = 1
         status = "Blocked"
 
-    # ---------------- SAVE ----------------
+    # ---------------- SAVE TO DATABASE ----------------
     conn = sqlite3.connect("fraud.db")
     cursor = conn.cursor()
 
@@ -132,7 +136,7 @@ def predict(data: dict):
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         merchant,
-        amount,
+        float(amount),
         fraud,
         risk,
         drift_flag,
@@ -144,6 +148,7 @@ def predict(data: dict):
     conn.commit()
     conn.close()
 
+    # ---------------- RESPONSE ----------------
     return {
         "fraud": fraud,
         "risk": risk,
@@ -151,3 +156,32 @@ def predict(data: dict):
         "drift": drift_flag,
         "status": status
     }
+
+# ---------------- LOG FRAUD (MANUAL) ----------------
+@app.post("/log_fraud")
+def log_fraud(data: dict):
+
+    merchant = data.get("merchant", "Unknown")
+    amount = data.get("amount", 0)
+
+    conn = sqlite3.connect("fraud.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    INSERT INTO transactions (merchant, amount, fraud, risk, drift, risk_score, time, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        merchant,
+        float(amount),
+        1,
+        "HIGH",
+        0,
+        0.99,
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Blocked"
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return {"message": "Fraud logged successfully"}

@@ -37,8 +37,11 @@ def home():
 # ---------------- PREDICT ----------------
 @app.post("/predict")
 def predict(data: dict):
-    amount = data["features"][-1]
+    print("Incoming Data:", data)
+
     merchant = data.get("merchant", "Unknown")
+    amount = data["features"][-1]
+    
 
     # logic
     if amount <= 2000:

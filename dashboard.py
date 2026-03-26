@@ -4,8 +4,10 @@ import pandas as pd
 import plotly.express as px
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
+from streamlit_autorefresh import st_autorefresh
 
 # ---------------- LOGIN ----------------
+st_autorefresh(interval=5000, key="refresh")  # refresh every 5 sec
 USERNAME = "admin"
 PASSWORD = "1234"
 
@@ -13,7 +15,7 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 def login():
-    st.title("🔐 Login")
+    st.title("🔐 UPI Fraud Detection Analysis")
     user = st.text_input("Username")
     pwd = st.text_input("Password", type="password")
 

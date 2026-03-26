@@ -63,7 +63,7 @@ def home():
     return {"message": "ML API Running"}
 
 # ---------------- PREDICT ----------------
-@app.post("/predict")
+@app.post("/log_fraud")
 def predict(data: dict):
     print("Incoming:", data)
 

@@ -108,21 +108,31 @@ def predict(data: dict):
 def send_otp(data: dict):
     phone = data.get("phone")
 
+    if not phone:
+        return {"error": "Phone number required"}
+
     otp = str(random.randint(100000, 999999))
     expiry = datetime.now() + timedelta(seconds=60)
 
     otp_store[phone] = (otp, expiry)
 
-    url = "https://control.msg91.com/api/v5/otp"
+    print("\n=========================")
+    print(f"OTP for {phone}: {otp}")
+    print("===========================")
 
-    payload = {
-        "template_id": TEMPLATE_ID,
-        "mobile": "91" + phone,
-        "authkey": MSG91_AUTH_KEY,
-        "otp": otp
-    }
+    try:
+        url = "https://control.msg91.com/api/v5/otp"
 
-    requests.post(url, data=payload)
+        payload = {
+            "template_id": TEMPLATE_ID,
+            "mobile": "91" + phone,
+            "authkey": MSG91_AUTH_KEY,
+            "otp": otp
+        }
+
+        requests.post(url, data=payload)
+    except:
+        print("⚠ SMS not sent (waiting for approval)")
 
     return {"message": "OTP sent"}
 

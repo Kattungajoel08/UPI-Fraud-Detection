@@ -12,7 +12,7 @@ model = pickle.load(open("fraud_model.pkl", "rb"))
 rf_model = pickle.load(open("rf_model.pkl", "rb"))
 iso_model = pickle.load(open("iso_model.pkl", "rb"))
 
-# ⚡ SPEED FIX (NO SCALER DELAY)
+# ---------------- FAST ML ----------------
 def fast_predict(amount):
     features = np.zeros((1, 30))
     features[0][-1] = amount
@@ -93,16 +93,16 @@ def verify_otp(data: dict):
 def predict(data: dict):
     amount = data.get("amount", 0)
 
-    risk_score = fast_predict(amount)
+    score = fast_predict(amount)
 
-    if risk_score < 0.4:
+    if score < 0.4:
         risk = "LOW"
-    elif risk_score < 0.7:
+    elif score < 0.7:
         risk = "MEDIUM"
     else:
         risk = "HIGH"
 
-    return {"risk": risk, "risk_score": float(risk_score)}
+    return {"risk": risk, "risk_score": float(score)}
 
 # ---------------- SAVE ----------------
 @app.post("/save_transaction")
@@ -116,7 +116,7 @@ def save_transaction(data: dict):
     """, (
         data["merchant"],
         data["amount"],
-        1 if data["risk"] == "HIGH" else 0,
+        1 if data["status"] == "Fraud" else 0,
         data["risk"],
         0,
         data["risk_score"],

@@ -75,7 +75,7 @@ def predict(data: dict):
 
     features = np.zeros((1, 30))
     features[0][-1] = amount
-    scaled = scaler.transform(features)
+    scaled = features
 
     prob = (0.6 * model.predict_proba(scaled)[0][1] +
             0.4 * rf_model.predict_proba(scaled)[0][1])

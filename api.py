@@ -18,7 +18,7 @@ scaler = pickle.load(open("scaler.pkl", "rb"))
 MSG91_AUTH_KEY = "YOUR_AUTH_KEY"
 TEMPLATE_ID = "YOUR_TEMPLATE_ID"
 
-otp_store = {}  # {phone: (otp, expiry_time)}
+otp_store = {}
 
 # ---------------- DB INIT ----------------
 def init_db():
@@ -94,7 +94,7 @@ def predict(data: dict):
     elif risk_score < 0.7:
         risk, fraud, status = "MEDIUM", 0, "OTP Required"
     else:
-        risk, fraud, status = "HIGH", 0, "Step-Up Required"
+        risk, fraud, status = "HIGH", 1, "Step-Up Required"
 
     return {
         "risk": risk,
@@ -103,36 +103,55 @@ def predict(data: dict):
         "status": status
     }
 
+# ---------------- SAVE TRANSACTION ----------------
+@app.post("/save_transaction")
+def save_transaction(data: dict):
+    conn = sqlite3.connect("fraud.db")
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    INSERT INTO transactions (merchant, amount, fraud, risk, drift, risk_score, time, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data.get("merchant"),
+        float(data.get("amount")),
+        int(data.get("fraud", 0)),
+        data.get("risk"),
+        int(data.get("drift", 0)),
+        float(data.get("risk_score", 0)),
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        data.get("status")
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return {"message": "Saved"}
+
 # ---------------- SEND OTP ----------------
 @app.post("/send_otp")
 def send_otp(data: dict):
     phone = data.get("phone")
-
-    if not phone:
-        return {"error": "Phone number required"}
 
     otp = str(random.randint(100000, 999999))
     expiry = datetime.now() + timedelta(seconds=60)
 
     otp_store[phone] = (otp, expiry)
 
-    print("\n=========================")
     print(f"OTP for {phone}: {otp}")
-    print("===========================")
 
     try:
-        url = "https://control.msg91.com/api/v5/otp"
-
-        payload = {
-            "template_id": TEMPLATE_ID,
-            "mobile": "91" + phone,
-            "authkey": MSG91_AUTH_KEY,
-            "otp": otp
-        }
-
-        requests.post(url, data=payload)
+        requests.post(
+            "https://control.msg91.com/api/v5/otp",
+            data={
+                "template_id": TEMPLATE_ID,
+                "mobile": "91" + phone,
+                "authkey": MSG91_AUTH_KEY,
+                "otp": otp
+            }
+        )
     except:
-        print("⚠ SMS not sent (waiting for approval)")
+        print("SMS not sent")
 
     return {"message": "OTP sent"}
 

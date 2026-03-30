@@ -1,15 +1,18 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import pickle
 import plotly.express as px
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
 from streamlit_autorefresh import st_autorefresh
+from datetime import datetime
+from services.risk_engine import compute_risk
 
 # ---------------- LOGIN ----------------
 st_autorefresh(interval=5000, key="refresh")  # refresh every 5 sec
-USERNAME = "admin"
-PASSWORD = "1234"
+USERNAME = "Project"
+PASSWORD = "729009"
 
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
@@ -42,11 +45,17 @@ df = pd.read_sql_query("SELECT * FROM transactions", conn)
 conn.close()
 
 st.title("💳 Fraud Dashboard")
+st.caption(f"Last updated: {datetime.now().strftime('%H:%M:%S')}")
+df["risk"] = df["risk"].fillna("Unknown")
+filter_option = st.selectbox("Filter by Risk", ["All", "LOW", "MEDIUM", "HIGH"])
+
+if filter_option != "All":
+    df = df[df["risk"] == filter_option]
 
 if df.empty:
     st.warning("No transactions yet")
 else:
-    df["Status"] = df["fraud"].apply(lambda x: "Blocked" if x==1 else "Approved")
+    df["Status"] = df["status"]
 
     # ---------------- METRICS ----------------
     st.subheader("📊 Metrics")
@@ -58,37 +67,122 @@ else:
     col1.metric("Total", total)
     col2.metric("Fraud", fraud)
     col3.metric("Safe", safe)
+    fraud_rate = (fraud / total) * 100 if total > 0 else 0
+    col4 = st.columns(1)[0]
+    col4.metric("Fraud Rate", f"{fraud_rate:.2f}%")
+    if fraud > 0:
+        st.error(f"⚠ {fraud} Fraud Transactions Detected!")
+    else:
+        st.success("✅ No Fraud Detected")
+    
+    st.info("System Status: Real-time Fraud Detection Active ✅")
+    st.subheader("🧠 Adaptive Learning")
+    st.success("Model is continuously learning from transactions ✅")
+    st.metric("Training Updates", len(df), delta="Live Updates")
 
     # ---------------- TABLE ----------------
     st.subheader("📄 Transactions")
     st.dataframe(df)
+    # ---------------- TIME ANALYSIS ----------------
+    st.subheader("⏱ Transactions Over Time")
+
+    df["time"] = pd.to_datetime(df["time"], errors="coerce")
+    df = df.dropna(subset=["time"])
+
+    time_df = df.groupby(df["time"].dt.hour).size().reset_index(name="count")
+    time_df = time_df.sort_values(by="time")
+
+    fig_time = px.line(time_df, x="time", y="count",
+                   labels={"time": "Hour of Day", "count": "Transactions"},
+                   title="Transactions per Hour")
+    st.plotly_chart(fig_time)
 
     # ---------------- RISK PIE ----------------
     st.subheader("🎯 Risk Distribution")
-    fig1 = px.pie(df, names="risk", title="Low vs Medium vs High")
+    fig1 = px.pie(df, names="risk", title="Risk Distribution")
     st.plotly_chart(fig1)
 
     # ---------------- APPROVED VS BLOCKED ----------------
     st.subheader("🚨 Approved vs Blocked")
-    fig2 = px.bar(df, x="Status", color="Status")
+    status_counts = df["Status"].value_counts().reset_index()
+    status_counts.columns = ["Status", "Count"]
+
+    fig2 = px.bar(status_counts, x="Status", y="Count", color="Status")
     st.plotly_chart(fig2)
 
     # ---------------- PERFORMANCE METRICS ----------------
     st.subheader("📈 Model Performance")
 
-    accuracy = 0.95
-    precision = 0.93
-    recall = 0.92
-    f1 = 0.925
+    metrics = pickle.load(open("metrics.pkl", "rb"))
 
-    perf_df = pd.DataFrame({
-        "Metric": ["Accuracy", "Precision", "Recall", "F1 Score"],
-        "Score": [accuracy, precision, recall, f1]
-    })
+    accuracy = metrics["RF"]["accuracy"]
+    precision = metrics["RF"]["precision"]
+    recall = metrics["RF"]["recall"]
+    f1 = metrics["RF"]["f1"]
 
-    fig3 = px.bar(perf_df, x="Metric", y="Score", title="Performance Scores")
-    st.plotly_chart(fig3)
+    col1, col2, col3, col4 = st.columns(4)
 
+    col1.metric("Accuracy", f"{accuracy*100:.1f}%")
+    col2.metric("Precision", f"{precision*100:.1f}%")
+    col3.metric("Recall", f"{recall*100:.1f}%")
+    col4.metric("F1 Score", f"{f1*100:.1f}%")
+
+    st.caption("Performance metrics based on trained ML models evaluation.")
+
+    # ---------------- ROC CURVE ----------------
+    st.subheader("📉 ROC Curve (Model Performance)")
+
+    from sklearn.metrics import roc_curve, auc
+    import numpy as np
+
+# Only use rows with labels
+    roc_df = df.dropna(subset=["fraud"])
+    roc_df = roc_df.taul(200)
+
+    if len(roc_df) > 5:
+
+        y_true = roc_df["fraud"].values
+
+    # Get predicted scores from model
+        y_scores = []
+
+        for amt in roc_df["amount"]:
+            result = compute_risk(amt)
+            y_scores.append(result["risk_score"])
+
+        y_scores = np.array(y_scores)
+
+    # Compute ROC
+        fpr, tpr, _ = roc_curve(y_true, y_scores)
+        roc_auc = auc(fpr, tpr)
+
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Scatter(
+            x=fpr, y=tpr,
+            mode='lines',
+            name=f'ROC Curve (AUC = {roc_auc:.2f})'
+        ))
+
+        fig.add_trace(go.Scatter(
+            x=[0, 1], y=[0, 1],
+            mode='lines',
+            line=dict(dash='dash'),
+            name='Random Model'
+        ))
+
+        fig.update_layout(
+            title="ROC Curve (Real Data)",
+            xaxis_title="False Positive Rate",
+            yaxis_title="True Positive Rate"
+        )
+
+        st.plotly_chart(fig)
+
+    else:
+        st.warning("Not enough data to generate ROC curve")
     # ---------------- ML VS ADAPTIVE ----------------
     st.subheader("⚖️ ML vs Adaptive Comparison")
 
@@ -109,9 +203,13 @@ else:
 
         content = []
         content.append(Paragraph("Fraud Detection Report", styles["Title"]))
-        content.append(Paragraph(f"Total: {total}", styles["Normal"]))
-        content.append(Paragraph(f"Fraud: {fraud}", styles["Normal"]))
-        content.append(Paragraph(f"Safe: {safe}", styles["Normal"]))
+        content.append(Paragraph(f"Total Transactions: {total}", styles["Normal"]))
+        content.append(Paragraph(f"Fraud Transactions: {fraud}", styles["Normal"]))
+        content.append(Paragraph(f"Safe Transactions: {safe}", styles["Normal"]))
+        content.append(Paragraph(f"Fraud Rate: {fraud_rate:.2f}%", styles["Normal"]))
+
+        high_risk = len(df[df["risk"] == "HIGH"])
+        content.append(Paragraph(f"High Risk Transactions: {high_risk}", styles["Normal"]))
 
         doc.build(content)
 

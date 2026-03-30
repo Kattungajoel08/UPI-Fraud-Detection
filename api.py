@@ -1,55 +1,29 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import sqlite3
 from datetime import datetime, timedelta
-import numpy as np
-import pickle
 import random
+
+# ✅ NEW IMPORT (ML ENGINE)
+from services.risk_engine import compute_risk, update_model
 
 app = FastAPI()
 
-# ---------------- LOAD MODELS ----------------
-model = pickle.load(open("fraud_model.pkl", "rb"))
-rf_model = pickle.load(open("rf_model.pkl", "rb"))
-iso_model = pickle.load(open("iso_model.pkl", "rb"))
-
-# ---------------- FAST ML ----------------
-def fast_predict(amount):
-    features = np.zeros((1, 30))
-    features[0][-1] = amount
-
-    prob = (0.6 * model.predict_proba(features)[0][1] +
-            0.4 * rf_model.predict_proba(features)[0][1])
-    
-    prob = min(max(prob, 0.1), 0.9)
-
-    anomaly = abs(iso_model.decision_function(features)[0])
-    anomaly = min(anomaly, 1)
-
-
-# Behavior based on amount (soft influence, not dominating)
-    if amount > 5000:
-        behavior = 0.7
-    elif amount > 2000:
-        behavior = 0.5
-    else:
-        behavior = 0.2
-
-# Amount contribution (scaled)
-    amount_factor = min(amount / 10000, 1)
-
-# ✅ Balanced scoring (sum = 1)
-    score = (
-        0.2 * prob +          # ML importance
-        0.2 * anomaly +       # anomaly importance
-        0.3 * behavior +       # behavior
-        0.3 * amount_factor    # amount influence
-    )
-
-    return min(score, 1)
+# ---------------- CORS ----------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ---------------- DATABASE ----------------
+def get_connection():
+    return sqlite3.connect("fraud.db", check_same_thread=False)
+
 def init_db():
-    conn = sqlite3.connect("fraud.db")
+    conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -88,9 +62,10 @@ def send_otp(data: dict):
         "attempts": 3
     }
 
-    print(f"OTP for {phone}: {otp}")
+    print(f"[OTP] {phone}: {otp}")
 
     return {"message": "OTP sent"}
+
 
 @app.post("/verify_otp")
 def verify_otp(data: dict):
@@ -114,31 +89,21 @@ def verify_otp(data: dict):
     record["attempts"] -= 1
     return {"status": "invalid", "attempts_left": record["attempts"]}
 
-# ---------------- FRAUD PREDICTION ----------------
+
+# ---------------- PREDICT ----------------
 @app.post("/predict")
 def predict(data: dict):
-    amount = data.get("amount", 0)
+    try:
+        amount = data.get("amount", 0)
+        result = compute_risk(amount)
+    except:
+        return {"risk": "LOW", "risk_score": 0.1}
 
-    score = fast_predict(amount)
-
-    if score < 0.3:
-        risk = "LOW"
-    elif score < 0.6:
-        risk = "MEDIUM"
-    else:
-        risk = "HIGH"
-
-    print(f"Amount: {amount}, Score: {score}, Risk: {risk}")
-
-    return {
-        "risk": risk,
-        "risk_score": float(score)
-    }
 
 # ---------------- SAVE TRANSACTION ----------------
-@app.post("/save_transaction")
+@app.post("/send")
 def save_transaction(data: dict):
-    conn = sqlite3.connect("fraud.db")
+    conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -160,17 +125,19 @@ def save_transaction(data: dict):
     conn.commit()
     conn.close()
 
+    # 🔥 ✅ ADAPTIVE LEARNING (MOST IMPORTANT)
+    label = 1 if data["status"] == "Fraud" else 0
+
+    if random.random() < 0.3:   # 30% learning
+        update_model(data["amount"], label)
+
     return {"message": "Transaction Saved"}
 
-# ---------------- SEND MONEY ----------------
-@app.post("/send")
-def send_money(data: dict):
-    return save_transaction(data)
 
 # ---------------- GET TRANSACTIONS ----------------
 @app.get("/transactions/{user}")
 def get_transactions(user: str):
-    conn = sqlite3.connect("fraud.db")
+    conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute("""

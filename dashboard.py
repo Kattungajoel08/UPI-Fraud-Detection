@@ -137,7 +137,7 @@ else:
 
 # Only use rows with labels
     roc_df = df.dropna(subset=["fraud"])
-    roc_df = roc_df.taul(200)
+    roc_df = roc_df.tail(200)
 
     if len(roc_df) > 5:
 
@@ -147,7 +147,7 @@ else:
         y_scores = []
 
         for amt in roc_df["amount"]:
-            result = compute_risk(amt)
+            result = compute_risk(amt, "demo_user")
             y_scores.append(result["risk_score"])
 
         y_scores = np.array(y_scores)

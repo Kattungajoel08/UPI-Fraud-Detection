@@ -95,10 +95,12 @@ def verify_otp(data: dict):
 def predict(data: dict):
     try:
         amount = data.get("amount", 0)
-        result = compute_risk(amount)
-    except:
+        user = data.get("sender", "unknown")
+        result = compute_risk(amount, user)
+        return result 
+    except Exception as e:
+        print("ERROR:", e)
         return {"risk": "LOW", "risk_score": 0.1}
-
 
 # ---------------- SAVE TRANSACTION ----------------
 @app.post("/send")
@@ -128,8 +130,7 @@ def save_transaction(data: dict):
     # 🔥 ✅ ADAPTIVE LEARNING (MOST IMPORTANT)
     label = 1 if data["status"] == "Fraud" else 0
 
-    if random.random() < 0.3:   # 30% learning
-        update_model(data["amount"], label)
+    update_model(data["amount"], data["sender"], label)
 
     return {"message": "Transaction Saved"}
 

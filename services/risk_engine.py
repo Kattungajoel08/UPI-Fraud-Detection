@@ -12,39 +12,71 @@ scaler = pickle.load(open(os.path.join(BASE_DIR, "scaler.pkl"), "rb"))
 
 initialized = False
 
-def compute_risk(amount):
-    features = np.zeros((1, 30))
-    features[0][-1] = amount
-    features = scaler.transform(features)
+def compute_risk(amount, user):
+    import sqlite3
+    from datetime import datetime
+    import numpy as np
 
-    prob = (
-        0.6 * model.predict_proba(features)[0][1] +
-        0.4 * rf_model.predict_proba(features)[0][1]
-    )
+    conn = sqlite3.connect("fraud.db")
+    cursor = conn.cursor()
 
+    cursor.execute("""
+        SELECT amount, time FROM transactions
+        WHERE sender=? ORDER BY id DESC LIMIT 10
+    """, (user,))
+    
+    rows = cursor.fetchall()
+    conn.close()
+
+    amounts = [r[0] for r in rows]
+
+    # -------- REAL FEATURES --------
+    avg = sum(amounts)/len(amounts) if amounts else amount
+    max_amt = max(amounts) if amounts else amount
+    freq = len(amounts)
+
+    deviation = amount - avg
+    ratio = amount / (avg + 1)
+
+    # time gap
+    if rows:
+        last_time = datetime.strptime(rows[0][1], "%Y-%m-%d %H:%M:%S")
+        time_gap = (datetime.now() - last_time).seconds
+    else:
+        time_gap = 9999
+
+    # -------- FEATURE VECTOR --------
+    # -------- FEATURE VECTOR --------
+    features = np.array([[amount, avg, max_amt, deviation, ratio, freq, time_gap]])
+
+# -------- PAD TO 30 FEATURES --------
+    full_features = np.zeros((1, 30))
+    full_features[0][:7] = features
+
+# -------- SCALE (IMPORTANT) --------
+    features = scaler.transform(full_features)
+
+    
+    # -------- ML + ANOMALY --------
+    prob = model.predict_proba(features)[0][1]
     anomaly = abs(iso_model.decision_function(features)[0])
 
-    if amount > 5000:
-        behavior = 0.7
-    elif amount > 2000:
-        behavior = 0.5
-    else:
-        behavior = 0.2
+    # -------- FINAL SCORE --------
+    score = 0.6 * prob + 0.4 * anomaly
 
-    amount_factor = min(amount / 10000, 1)
+    # behavior boost
+    if amount > 2 * avg:
+        score += 0.2
 
-    score = (
-        0.2 * prob +
-        0.2 * anomaly +
-        0.3 * behavior +
-        0.3 * amount_factor
-    )
+    if freq >= 3 and time_gap < 60:
+        score += 0.2
 
     score = float(min(score, 1))
 
-    if score < 0.3:
+    # -------- RISK --------
+    if score < 0.35:
         risk = "LOW"
-    elif score < 0.6:
+    elif score < 0.65:
         risk = "MEDIUM"
     else:
         risk = "HIGH"
@@ -52,19 +84,36 @@ def compute_risk(amount):
     return {"risk": risk, "risk_score": score}
 
 
-def update_model(amount, label):
-    global initialized, model
+def update_model(amount, user, label):
+    import sqlite3
+    import numpy as np
 
-    features = np.zeros((1, 30))
-    features[0][-1] = amount
-    features = scaler.transform(features)
+    conn = sqlite3.connect("fraud.db")
+    cursor = conn.cursor()
 
-    y = np.array([label])
+    cursor.execute("""
+        SELECT amount FROM transactions
+        WHERE sender=? ORDER BY id DESC LIMIT 10
+    """, (user,))
+    
+    rows = cursor.fetchall()
+    conn.close()
 
-    if not initialized:
-        model.partial_fit(features, y, classes=np.array([0,1]))
-        initialized = True
-    else:
-        model.partial_fit(features, y)
+    amounts = [r[0] for r in rows]
+
+    avg = sum(amounts)/len(amounts) if amounts else amount
+    deviation = amount - avg
+    ratio = amount / (avg + 1)
+
+    features = np.array([[amount, avg, max(amounts) if amounts else amount, deviation, ratio, len(amounts), 0]])
+
+# pad to 30
+    full_features = np.zeros((1, 30))
+    full_features[0][:7] = features
+
+# scale
+    features = scaler.transform(full_features)
+
+    model.partial_fit(features, [label], classes=[0,1])
 
     pickle.dump(model, open(os.path.join(BASE_DIR, "fraud_model.pkl"), "wb"))

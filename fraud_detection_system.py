@@ -15,7 +15,7 @@ def simulate_transaction():
         print("\n🔄 Processing Transaction...")
         time.sleep(1)
 
-        result = compute_risk(amount)
+        result = compute_risk(amount, "test_user")
         score = result["risk_score"]
         risk = result["risk"]
 

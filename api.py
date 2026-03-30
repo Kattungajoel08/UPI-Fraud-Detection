@@ -105,6 +105,7 @@ def predict(data: dict):
 # ---------------- SAVE TRANSACTION ----------------
 @app.post("/send")
 def save_transaction(data: dict):
+    print("RECEIVED DATA:", data)
     conn = get_connection()
     cursor = conn.cursor()
 

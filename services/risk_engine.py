@@ -56,27 +56,38 @@ def compute_risk(amount, user):
 # -------- SCALE (IMPORTANT) --------
     features = scaler.transform(full_features)
 
+    if amount >= max(30000, 3 * avg):
+        return {"risk": "HIGH", "risk_score": 0.9}
+    
+    if amount >= 15000 and ratio > 2:
+        return {"risk": "HIGH", "risk_score": 0.85}
+
     
     # -------- ML + ANOMALY --------
     prob = model.predict_proba(features)[0][1]
-    anomaly = abs(iso_model.decision_function(features)[0])
+    anomaly = iso_model.decision_function(features)[0]
+    anomaly_score = 1 - (anomaly + 1) / 2
+    anomaly_score = max(0,min(anomaly_score, 1))
 
     # -------- FINAL SCORE --------
-    score = 0.6 * prob + 0.4 * anomaly
+    score = 0.6 * prob + 0.4 * anomaly_score
 
     # behavior boost
     if amount > 2 * avg:
-        score += 0.2
+        score += 0.25
+    
+    if amount > 5 * avg:
+        score += 0.4
 
     if freq >= 3 and time_gap < 60:
-        score += 0.2
+        score += 0.25
 
-    score = float(min(score, 1))
+    score = float(max(0, min(score, 1)))
 
     # -------- RISK --------
-    if score < 0.35:
+    if score < 0.4:
         risk = "LOW"
-    elif score < 0.65:
+    elif score < 0.7:
         risk = "MEDIUM"
     else:
         risk = "HIGH"

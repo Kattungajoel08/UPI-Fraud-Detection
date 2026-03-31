@@ -105,35 +105,40 @@ def predict(data: dict):
 # ---------------- SAVE TRANSACTION ----------------
 @app.post("/send")
 def save_transaction(data: dict):
-    print("RECEIVED DATA:", data)
-    conn = get_connection()
-    cursor = conn.cursor()
+    try:
 
-    cursor.execute("""
-    INSERT INTO transactions 
-    (sender, receiver, amount, fraud, risk, drift, risk_score, time, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        data["sender"],
-        data["receiver"],
-        data["amount"],
-        1 if data["status"] == "Fraud" else 0,
-        data["risk"],
-        0,
-        data["risk_score"],
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        data["status"]
-    ))
+        print("RECEIVED DATA:", data)
+        conn = get_connection()
+        cursor = conn.cursor()
 
-    conn.commit()
-    conn.close()
+        cursor.execute("""
+        INSERT INTO transactions 
+        (sender, receiver, amount, fraud, risk, drift, risk_score, time, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            data["sender"],
+            data["receiver"],
+            data["amount"],
+            1 if data["status"] == "Fraud" else 0,
+            data["risk"],
+            0,
+            data["risk_score"],
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            data["status"]
+        ))
+
+        conn.commit()
+        conn.close()
 
     # 🔥 ✅ ADAPTIVE LEARNING (MOST IMPORTANT)
-    label = 1 if data["status"] == "Fraud" else 0
+        label = 1 if data["status"] == "Fraud" else 0
 
-    update_model(data["amount"], data["sender"], label)
+        update_model(data["amount"], data["sender"], label)
 
-    return {"message": "Transaction Saved"}
+        return {"message": "Transaction Saved"}
+    except Exception as e:
+        print("SAVE ERROR: ", e)
+        return {"error": str(e)}
 
 
 # ---------------- GET TRANSACTIONS ----------------

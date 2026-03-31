@@ -4,6 +4,10 @@ import pickle
 import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+db_path = os.path.join(BASE_DIR, "fraud.db")
+
+def get_connection():
+    return sqlite3.connect(db_path, check_same_thread=False)
 
 model = pickle.load(open(os.path.join(BASE_DIR, "fraud_model.pkl"), "rb"))
 rf_model = pickle.load(open(os.path.join(BASE_DIR, "rf_model.pkl"), "rb"))
@@ -46,7 +50,6 @@ def compute_risk(amount, user):
         time_gap = 9999
 
     # -------- FEATURE VECTOR --------
-    # -------- FEATURE VECTOR --------
     features = np.array([[amount, avg, max_amt, deviation, ratio, freq, time_gap]])
 
 # -------- PAD TO 30 FEATURES --------
@@ -61,7 +64,6 @@ def compute_risk(amount, user):
     
     if amount >= 15000 and ratio > 2:
         return {"risk": "HIGH", "risk_score": 0.85}
-
     
     # -------- ML + ANOMALY --------
     prob = model.predict_proba(features)[0][1]
@@ -74,15 +76,18 @@ def compute_risk(amount, user):
 
     # behavior boost
     if amount > 2 * avg:
-        score += 0.25
+        score += 0.15
     
     if amount > 5 * avg:
-        score += 0.4
+        score += 0.25
 
     if freq >= 3 and time_gap < 60:
         score += 0.25
 
     score = float(max(0, min(score, 1)))
+
+    if amount >= 8000 and score < 0.6:
+        return {"risk": "MEDIUM", "risk_score": max(score, 0.4)}
 
     # -------- RISK --------
     if score < 0.4:

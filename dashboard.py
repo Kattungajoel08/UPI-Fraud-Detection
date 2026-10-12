@@ -82,6 +82,7 @@ else:
 
     # ---------------- TABLE ----------------
     st.subheader("📄 Transactions")
+    df["reason"] = df["reason"].fillna("—")
     st.dataframe(df)
     # ---------------- TIME ANALYSIS ----------------
     st.subheader("⏱ Transactions Over Time")
@@ -102,6 +103,18 @@ else:
     fig1 = px.pie(df, names="risk", title="Risk Distribution")
     st.plotly_chart(fig1)
 
+    # ---------------- AMOUNT DISTRIBUTION ----------------
+    st.subheader("💰 Transaction Amount Distribution")
+
+    fig_amount = px.histogram(
+        df,
+        x="amount",
+        nbins=30,
+        title="Distribution of Transaction Amounts"
+    )
+
+    st.plotly_chart(fig_amount)
+
     # ---------------- APPROVED VS BLOCKED ----------------
     st.subheader("🚨 Approved vs Blocked")
     status_counts = df["Status"].value_counts().reset_index()
@@ -113,76 +126,39 @@ else:
     # ---------------- PERFORMANCE METRICS ----------------
     st.subheader("📈 Model Performance")
 
-    metrics = pickle.load(open("metrics.pkl", "rb"))
-
-    accuracy = metrics["RF"]["accuracy"]
-    precision = metrics["RF"]["precision"]
-    recall = metrics["RF"]["recall"]
-    f1 = metrics["RF"]["f1"]
-
-    col1, col2, col3, col4 = st.columns(4)
-
-    col1.metric("Accuracy", f"{accuracy*100:.1f}%")
-    col2.metric("Precision", f"{precision*100:.1f}%")
-    col3.metric("Recall", f"{recall*100:.1f}%")
-    col4.metric("F1 Score", f"{f1*100:.1f}%")
-
-    st.caption("Performance metrics based on trained ML models evaluation.")
-
-    # ---------------- ROC CURVE ----------------
-    st.subheader("📉 ROC Curve (Model Performance)")
-
-    from sklearn.metrics import roc_curve, auc
+    from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
     import numpy as np
 
-# Only use rows with labels
-    roc_df = df.dropna(subset=["fraud"])
-    roc_df = roc_df.tail(200)
+    perf_df = df.dropna(subset=["fraud"])
 
-    if len(roc_df) > 5:
+    if len(perf_df) > 20:
 
-        y_true = roc_df["fraud"].values
+        y_true = perf_df["fraud"].values
+        y_pred = []
 
-    # Get predicted scores from model
-        y_scores = []
+        for amt in perf_df["amount"]:
+            res = compute_risk(amt, "demo_user")
+            y_pred.append(1 if res["risk"] in ["HIGH", "MEDIUM"] else 0)
 
-        for amt in roc_df["amount"]:
-            result = compute_risk(amt, "demo_user")
-            y_scores.append(result["risk_score"])
+        y_pred = np.array(y_pred)
 
-        y_scores = np.array(y_scores)
+        accuracy = accuracy_score(y_true, y_pred)
+        precision = precision_score(y_true, y_pred, zero_division=0)
+        recall = recall_score(y_true, y_pred, zero_division=0)
+        f1 = f1_score(y_true, y_pred, zero_division=0)
 
-    # Compute ROC
-        fpr, tpr, _ = roc_curve(y_true, y_scores)
-        roc_auc = auc(fpr, tpr)
+        col1, col2, col3, col4 = st.columns(4)
 
-        import plotly.graph_objects as go
+        col1.metric("Accuracy", f"{accuracy*100:.1f}%")
+        col2.metric("Precision", f"{precision*100:.1f}%")
+        col3.metric("Recall", f"{recall*100:.1f}%")
+        col4.metric("F1 Score", f"{f1*100:.1f}%")
 
-        fig = go.Figure()
-
-        fig.add_trace(go.Scatter(
-            x=fpr, y=tpr,
-            mode='lines',
-            name=f'ROC Curve (AUC = {roc_auc:.2f})'
-        ))
-
-        fig.add_trace(go.Scatter(
-            x=[0, 1], y=[0, 1],
-            mode='lines',
-            line=dict(dash='dash'),
-            name='Random Model'
-        ))
-
-        fig.update_layout(
-            title="ROC Curve (Real Data)",
-            xaxis_title="False Positive Rate",
-            yaxis_title="True Positive Rate"
-        )
-
-        st.plotly_chart(fig)
+        st.caption("Metrics are calculated in real-time from transaction data.")
 
     else:
-        st.warning("Not enough data to generate ROC curve")
+        st.warning("Not enough data to calculate performance")
+
     # ---------------- ML VS ADAPTIVE ----------------
     st.subheader("⚖️ ML vs Adaptive Comparison")
 

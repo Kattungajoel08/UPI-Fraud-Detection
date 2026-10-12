@@ -25,6 +25,11 @@ def get_connection():
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(transactions)")
+    columns = [col[1] for col in cursor.fetchall()]
+
+    if "reason" not in columns:
+        cursor.execute("ALTER TABLE transactions ADD COLUMN reason TEXT")
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
@@ -37,7 +42,8 @@ def init_db():
         drift INTEGER,
         risk_score REAL,
         time TEXT,
-        status TEXT
+        status TEXT,
+        reason TEXT
     )
     """)
 
@@ -94,13 +100,17 @@ def verify_otp(data: dict):
 @app.post("/predict")
 def predict(data: dict):
     try:
+        print("Predict Input:", data)
         amount = data.get("amount", 0)
+        if amount <=0:
+            return {"risk": "LOW", "risk_score": 0.1}
         user = data.get("sender", "unknown")
         result = compute_risk(amount, user)
         return result 
     except Exception as e:
         print("ERROR:", e)
         return {"risk": "LOW", "risk_score": 0.1}
+
 
 # ---------------- SAVE TRANSACTION ----------------
 @app.post("/send")
@@ -113,8 +123,8 @@ def save_transaction(data: dict):
 
         cursor.execute("""
         INSERT INTO transactions 
-        (sender, receiver, amount, fraud, risk, drift, risk_score, time, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (sender, receiver, amount, fraud, risk, drift, risk_score, time, status, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data["sender"],
             data["receiver"],
@@ -124,7 +134,8 @@ def save_transaction(data: dict):
             0,
             data["risk_score"],
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            data["status"]
+            data["status"],
+            data.get("reason","")
         ))
 
         conn.commit()
@@ -132,8 +143,12 @@ def save_transaction(data: dict):
 
     # 🔥 ✅ ADAPTIVE LEARNING (MOST IMPORTANT)
         label = 1 if data["status"] == "Fraud" else 0
-
-        update_model(data["amount"], data["sender"], label)
+        if (
+            data["status"] == "Fraud" and 
+            data["risk"] == "HIGH" and 
+            data["amount"] > 5000
+        ):
+            update_model(data["amount"], data["sender"], label)
 
         return {"message": "Transaction Saved"}
     except Exception as e:
@@ -148,7 +163,7 @@ def get_transactions(user: str):
     cursor = conn.cursor()
 
     cursor.execute("""
-    SELECT sender, receiver, amount, status, time
+    SELECT sender, receiver, amount, status, time, reason
     FROM transactions
     WHERE sender=? OR receiver=?
     ORDER BY id DESC
@@ -163,7 +178,34 @@ def get_transactions(user: str):
             "receiver": r[1],
             "amount": r[2],
             "status": r[3],
-            "time": r[4]
+            "time": r[4],
+            "reason": r[5]
         }
         for r in rows
     ]
+# ---------------- GET BALANCE ----------------
+@app.get("/balance/{user}")
+def get_balance(user: str):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    # total received
+    cursor.execute(
+        "SELECT SUM(amount) FROM transactions WHERE receiver=? AND status='Success'",
+        (user,)
+    )
+    received = cursor.fetchone()[0] or 0
+
+    # total sent
+    cursor.execute(
+        "SELECT SUM(amount) FROM transactions WHERE sender=? AND status='Success'",
+        (user,)
+    )
+    sent = cursor.fetchone()[0] or 0
+
+    conn.close()
+
+    # initial balance
+    balance = 500000 + received - sent
+
+    return {"balance": balance}
